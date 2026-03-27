@@ -1,0 +1,20 @@
+language: jvm
+sanitizer:
+  - address
+fuzzing_engines:
+  - libfuzzer
+main_repo: '.'
+base_os_version: ubuntu-22-04
+architectures:
+  - x86_64
+fuzz_targets:
+  - name: BatchFuzzer
+    path: src/fuzz/java/com/tkr/fuzz/BatchFuzzer.java
+  - name: RouterFuzzer
+    path: src/fuzz/java/com/tkr/fuzz/RouterFuzzer.java
+  - name: SessionFuzzer
+    path: src/fuzz/java/com/tkr/fuzz/SessionFuzzer.java
+  - name: FixFuzzer
+    path: src/fuzz/java/com/tkr/fuzz/FixFuzzer.java
+  - name: SwiftFuzzer
+    path: src/fuzz/java/com/tkr/fuzz/SwiftFuzzer.java
