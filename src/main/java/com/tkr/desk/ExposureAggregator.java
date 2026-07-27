@@ -155,12 +155,12 @@ public final class ExposureAggregator {
         return symbolGross > capCents;
     }
 
-    private static int weightedAverage(int currentAvg, int priorCount, int newValue) {
+    private static long weightedAverage(long currentAvg, int priorCount, int newValue) {
         if (priorCount <= 0) {
             return newValue;
         }
-        long sum = (long) currentAvg * priorCount + newValue;
-        return (int) (sum / (priorCount + 1));
+        long sum = currentAvg * priorCount + newValue;
+        return sum / (priorCount + 1);
     }
 
     private static int countDistinctAccounts(List<ExposureSlice> slices) {
