@@ -35,6 +35,8 @@ public final class DeskRegistry {
     private final LotSplitter lotSplitter = new LotSplitter();
     private final TaxLotMatcher taxMatcher = new TaxLotMatcher();
     private final BenchmarkTracker benchmark = new BenchmarkTracker();
+    private final ExposureAggregator exposure = new ExposureAggregator(0, true);
+    private final NavCalculator nav = new NavCalculator(25, 150);
 
     public Status runBatchDesks(BatchWireFrame frame, DeskRunContext ctx) {
         if (frame == null || ctx == null) return Status.BOUNDS_ERROR;
@@ -88,6 +90,19 @@ public final class DeskRegistry {
         }
 
         benchmark.trackBatch(frame);
+
+        ExposureAggregator.ExposureReport exposureReport = exposure.aggregate(frame);
+        if (exposureReport.status != Status.OK) {
+            return exposureReport.status;
+        }
+        if (exposure.exceedsSymbolCap(exposureReport, frame.header.deskId, 50_000_000L)) {
+            return Status.COMPLIANCE_REJECT;
+        }
+
+        NavCalculator.NavSnapshot navSnap = nav.compute(frame);
+        if (nav.violatesMinNav(navSnap, -1_000_000_000L)) {
+            return Status.MARGIN_BREACH;
+        }
 
         st = runMarginPass(frame);
         ctx.marginOk = st == Status.OK;

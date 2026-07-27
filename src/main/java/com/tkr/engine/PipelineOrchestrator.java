@@ -6,6 +6,7 @@ import com.tkr.ledger.ChannelTape;
 import com.tkr.types.WireTypes;
 import com.tkr.types.WireTypes.*;
 import com.tkr.wire.BatchWireCodec;
+import com.tkr.wire.WireValidator;
 
 /** Orchestrates allocation, router, and session merge pipelines. */
 public final class PipelineOrchestrator {
@@ -29,6 +30,9 @@ public final class PipelineOrchestrator {
         BatchWireCodec.BatchDecodeResult decoded = codec.decodeBatch(data, offset, length);
         if (decoded.status != Status.OK) return decoded.status;
         if ((decoded.frame.header.flags & WireTypes.BATCH_FLAG_DEFERRED_DIGEST) == 0) return Status.OK;
+        WireValidator validator = new WireValidator(true, WireTypes.MAX_BATCH_RECORDS);
+        WireValidator.ValidationResult vr = validator.validateBatchFrame(decoded.frame);
+        if (vr.status != Status.OK) return vr.status;
         return processBatchFrame(decoded.frame);
     }
 
