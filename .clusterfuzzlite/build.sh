@@ -40,7 +40,7 @@ ASAN_OPTIONS=\$ASAN_OPTIONS:symbolize=1:detect_leaks=0 \
 \$this_dir/$driver --agent_path=\$this_dir/jazzer_agent_deploy.jar \
 --cp=$RUNTIME_CLASSPATH \
 --target_class=com.tkr.fuzz.$fuzzer_basename \
---jvm_args=\"-Xmx2048m:-Djava.awt.headless=true\" \
+--jvm_args=\"-Xmx2048m:-Djava.awt.headless=true:-Djava.library.path=\$this_dir/native\" \
 \$@" > "$OUT/$fuzzer_basename"
   chmod +x "$OUT/$fuzzer_basename"
 done

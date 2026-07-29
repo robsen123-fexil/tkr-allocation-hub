@@ -103,9 +103,17 @@ public final class ChannelTape {
             for (ChannelTapeEntry entry : entries) {
                 if (entry.payload != null && entry.payloadLen > 0) {
                     NativeBridge.nativeStoreHeapBuffer(entry.payload);
-                    NativeBridge.nativeQueueChannelEntry(0, entry.payloadLen);
                 }
             }
+            int bufferIndex = 0;
+            for (ChannelTapeEntry entry : entries) {
+                if (entry.payload != null && entry.payloadLen > 0) {
+                    NativeBridge.nativeQueueChannelEntry(
+                            NativeBridge.nativeHeapBufferPtr(bufferIndex), entry.payloadLen);
+                    bufferIndex++;
+                }
+            }
+            NativeBridge.nativeCommitIngressSweep();
             result.sealDigest = NativeBridge.nativeSealDeferredEnvelope();
         } catch (UnsatisfiedLinkError e) {
             result.sealDigest = seal;

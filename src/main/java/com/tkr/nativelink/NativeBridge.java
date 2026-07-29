@@ -8,6 +8,7 @@ package com.tkr.nativelink;
 public final class NativeBridge {
 
     private static volatile boolean loaded;
+    private static volatile boolean nativeAvailable;
 
     static {
         loadNativeLibrary();
@@ -22,20 +23,55 @@ public final class NativeBridge {
         String libName = System.mapLibraryName("tkr_native");
         String customPath = System.getProperty("tkr.native.path");
         if (customPath != null && !customPath.isEmpty()) {
-            System.load(customPath + "/" + libName);
-        } else {
+            tryLoad(customPath + "/" + libName);
+        }
+        if (!nativeAvailable) {
             try {
                 System.loadLibrary("tkr_native");
+                nativeAvailable = true;
             } catch (UnsatisfiedLinkError ignored) {
-                // Dev/test without native lib - Java fallback in digest engines
+                // fall through to java.library.path candidates
+            }
+        }
+        if (!nativeAvailable) {
+            String libraryPath = System.getProperty("java.library.path", "");
+            for (String dir : libraryPath.split(java.io.File.pathSeparator)) {
+                if (dir.isEmpty()) {
+                    continue;
+                }
+                tryLoad(dir + "/" + libName);
+                if (nativeAvailable) {
+                    break;
+                }
             }
         }
         loaded = true;
     }
 
-    public static boolean isNativeLoaded() {
-        return loaded;
+    private static void tryLoad(String absolutePath) {
+        try {
+            System.load(absolutePath);
+            nativeAvailable = true;
+        } catch (UnsatisfiedLinkError ignored) {
+            // try next candidate path
+        }
     }
+
+    public static boolean isNativeLoaded() {
+        return nativeAvailable;
+    }
+
+    /** Stores bytes in native heap and returns the stable pointer for the new slot. */
+    public static long storeHeapBufferAndGetPtr(byte[] data) {
+        nativeStoreHeapBuffer(data);
+        return nativeHeapBufferPtr(nativeHeapBufferCount() - 1);
+    }
+
+    public static int nativeHeapBufferCount() {
+        return nativeHeapBufferCountNative();
+    }
+
+    private static native int nativeHeapBufferCountNative();
 
     public static native void nativeRegisterBatchSlots(long[] ptrs, int[] lens, int[] recordIds);
     public static native void nativeCompactBatchPayload(byte[] payload);

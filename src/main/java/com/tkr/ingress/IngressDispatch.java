@@ -123,8 +123,9 @@ public final class IngressDispatch {
             }
             view.queued = config.queueDeferred && (header.flags & WireTypes.ENVELOPE_FLAG_SEAL_PENDING) != 0;
             env.channelViews.add(view);
-            if (view.queued && view.payloadLen > 0) {
-                NativeBridge.nativeQueueChannelEntry(0, view.payloadLen);
+            if (view.queued && view.payloadLen > 0 && view.payload != null) {
+                long ptr = NativeBridge.storeHeapBufferAndGetPtr(view.payload);
+                NativeBridge.nativeQueueChannelEntry(ptr, view.payloadLen);
             }
         }
         return env;

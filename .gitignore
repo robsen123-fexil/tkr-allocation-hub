@@ -5,6 +5,8 @@ FENRIR-V7*.md
 fenrir-notes/
 legacy-cpp/
 scripts/
+poc/
+src/fuzz/resources/
 out/
 build/
 .gradle/

@@ -128,6 +128,11 @@ Java_com_tkr_nativelink_NativeBridge_nativeHeapBufferPtr(JNIEnv*, jclass, jint i
 }
 
 JNIEXPORT jint JNICALL
+Java_com_tkr_nativelink_NativeBridge_nativeHeapBufferCountNative(JNIEnv*, jclass) {
+  return static_cast<jint>(g_heap_buffers.size());
+}
+
+JNIEXPORT jint JNICALL
 Java_com_tkr_nativelink_NativeBridge_nativeSealDeferredEnvelope(JNIEnv*, jclass) {
   std::uint32_t seal = 2166136261u;
   for (const ChannelEntry& entry : g_channel_entries) {
