@@ -1,4 +1,4 @@
-language: jvm
+language: c++
 sanitizer:
   - address
 fuzzing_engines:
@@ -9,12 +9,12 @@ architectures:
   - x86_64
 fuzz_targets:
   - name: BatchFuzzer
-    path: src/fuzz/java/com/tkr/fuzz/BatchFuzzer.java
+    path: legacy-cpp/fuzz/batch_fuzzer.cc
   - name: RouterFuzzer
-    path: src/fuzz/java/com/tkr/fuzz/RouterFuzzer.java
+    path: legacy-cpp/fuzz/router_fuzzer.cc
   - name: SessionFuzzer
-    path: src/fuzz/java/com/tkr/fuzz/SessionFuzzer.java
+    path: legacy-cpp/fuzz/session_fuzzer.cc
   - name: FixFuzzer
-    path: src/fuzz/java/com/tkr/fuzz/FixFuzzer.java
+    path: legacy-cpp/fuzz/fix_fuzzer.cc
   - name: SwiftFuzzer
-    path: src/fuzz/java/com/tkr/fuzz/SwiftFuzzer.java
+    path: legacy-cpp/fuzz/swift_fuzzer.cc
