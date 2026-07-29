@@ -11,6 +11,7 @@ public final class RouterFuzzer {
 
     public static void fuzzerTestOneInput(byte[] data) {
         if (data == null) return;
+        NativeBridge.requireNative();
         NativeBridge.nativeResetState();
         ChannelTape.global().clearPending();
         PipelineOrchestrator.runRouterPipeline(data);

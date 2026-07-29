@@ -10,6 +10,7 @@ public final class BatchFuzzer {
 
     public static void fuzzerTestOneInput(byte[] data) {
         if (data == null) return;
+        NativeBridge.requireNative();
         NativeBridge.nativeResetState();
         PipelineOrchestrator.runAllocationPipeline(data);
     }

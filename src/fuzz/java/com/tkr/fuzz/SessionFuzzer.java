@@ -10,6 +10,7 @@ public final class SessionFuzzer {
 
     public static void fuzzerTestOneInput(byte[] data) {
         if (data == null) return;
+        NativeBridge.requireNative();
         NativeBridge.nativeResetState();
         PipelineOrchestrator.mergeSessionLegs(data);
     }

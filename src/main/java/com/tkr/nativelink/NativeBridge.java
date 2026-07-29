@@ -1,5 +1,11 @@
 package com.tkr.nativelink;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+
 /**
  * JNI bridge to libtkr_native.so for native digest flush paths.
  * Native code contains intentional UAF bug sites exercised by fuzzers.
@@ -21,6 +27,7 @@ public final class NativeBridge {
             return;
         }
         String libName = System.mapLibraryName("tkr_native");
+
         String envLib = System.getenv("TKR_NATIVE_LIB");
         if (envLib != null && !envLib.isEmpty()) {
             tryLoad(envLib);
@@ -33,27 +40,47 @@ public final class NativeBridge {
         if (!nativeAvailable && customPath != null && !customPath.isEmpty()) {
             tryLoad(customPath + "/" + libName);
         }
+
+        if (!nativeAvailable) {
+            String cwd = System.getProperty("user.dir", ".");
+            tryLoad(Path.of(cwd, "native", libName).toString());
+            tryLoad(Path.of(cwd, libName).toString());
+        }
+
         if (!nativeAvailable) {
             try {
                 System.loadLibrary("tkr_native");
                 nativeAvailable = true;
             } catch (UnsatisfiedLinkError ignored) {
-                // fall through to java.library.path candidates
+                // fall through
             }
         }
+
         if (!nativeAvailable) {
             String libraryPath = System.getProperty("java.library.path", "");
             for (String dir : libraryPath.split(java.io.File.pathSeparator)) {
                 if (dir.isEmpty()) {
                     continue;
                 }
-                tryLoad(dir + "/" + libName);
+                tryLoad(Path.of(dir, libName).toString());
                 if (nativeAvailable) {
                     break;
                 }
             }
         }
+
+        if (!nativeAvailable) {
+            loadNativeFromJar("/native/" + libName);
+        }
+
         loaded = true;
+    }
+
+    public static void requireNative() {
+        loadNativeLibrary();
+        if (!nativeAvailable) {
+            throw new UnsatisfiedLinkError("libtkr_native.so could not be loaded");
+        }
     }
 
     private static void tryLoad(String absolutePath) {
@@ -65,17 +92,34 @@ public final class NativeBridge {
         }
     }
 
+    private static void loadNativeFromJar(String resourcePath) {
+        try (InputStream in = NativeBridge.class.getResourceAsStream(resourcePath)) {
+            if (in == null) {
+                return;
+            }
+            Path tmp = Files.createTempFile("tkr_native_", ".so");
+            tmp.toFile().deleteOnExit();
+            Files.copy(in, tmp, StandardCopyOption.REPLACE_EXISTING);
+            System.load(tmp.toAbsolutePath().toString());
+            nativeAvailable = true;
+        } catch (IOException | UnsatisfiedLinkError ignored) {
+            // extraction or load failed
+        }
+    }
+
     public static boolean isNativeLoaded() {
         return nativeAvailable;
     }
 
     /** Stores bytes in native heap and returns the stable pointer for the new slot. */
     public static long storeHeapBufferAndGetPtr(byte[] data) {
+        requireNative();
         nativeStoreHeapBuffer(data);
         return nativeHeapBufferPtr(nativeHeapBufferCount() - 1);
     }
 
     public static int nativeHeapBufferCount() {
+        requireNative();
         return nativeHeapBufferCountNative();
     }
 
@@ -92,6 +136,7 @@ public final class NativeBridge {
     public static native void nativeRegisterMergeSlots(long[] ptrs, int[] lens, int[] legIds);
     public static native void nativeGraftSessionLegs(byte[] refBlob);
     public static native int nativeFlushMergeDigest();
+
     public static void nativeResetState() {
         if (!nativeAvailable) {
             return;
@@ -102,6 +147,7 @@ public final class NativeBridge {
     private static native void nativeResetStateNative();
 
     public static void registerBatchSlotsFromJava(com.tkr.types.WireTypes.DeferredSlot[] slots) {
+        requireNative();
         if (slots == null || slots.length == 0) {
             nativeRegisterBatchSlots(new long[0], new int[0], new int[0]);
             return;
@@ -124,6 +170,7 @@ public final class NativeBridge {
     }
 
     public static void registerMergeSlotsFromJava(java.util.List<com.tkr.types.WireTypes.MergeSlot> slots) {
+        requireNative();
         if (slots == null || slots.isEmpty()) {
             nativeRegisterMergeSlots(new long[0], new int[0], new int[0]);
             return;

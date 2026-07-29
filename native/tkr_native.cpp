@@ -82,6 +82,10 @@ HeapBuffer* StoreBytes(const std::uint8_t* bytes, std::size_t len) {
 
 extern "C" {
 
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM*, void*) {
+  return JNI_VERSION_1_8;
+}
+
 JNIEXPORT void JNICALL
 Java_com_tkr_nativelink_NativeBridge_nativeRegisterBatchSlots(
     JNIEnv* env, jclass, jlongArray ptrs, jintArray lens, jintArray record_ids) {
