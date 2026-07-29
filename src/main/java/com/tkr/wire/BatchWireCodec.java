@@ -11,7 +11,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** TKR1 batch wire codec — encode/decode binary batch frames with deferred slots. */
+/** TKR1 batch wire codec - encode/decode binary batch frames with deferred slots. */
 public final class BatchWireCodec {
 
     public static final int BATCH_HEADER_SIZE = 32;

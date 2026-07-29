@@ -27,7 +27,7 @@ public final class NativeBridge {
             try {
                 System.loadLibrary("tkr_native");
             } catch (UnsatisfiedLinkError ignored) {
-                // Dev/test without native lib — Java fallback in digest engines
+                // Dev/test without native lib - Java fallback in digest engines
             }
         }
         loaded = true;

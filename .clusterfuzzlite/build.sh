@@ -12,7 +12,7 @@ if [ -f "./gradlew" ]; then
 else
   find src/main/java -name '*.java' > sources.txt
   mkdir -p build/classes
-  javac -d build/classes @sources.txt
+  javac -encoding UTF-8 -d build/classes @sources.txt
   jar cf "$OUT"/tkr-allocation-hub.jar -C build/classes .
 fi
 
@@ -29,7 +29,7 @@ $CXX $CXXFLAGS $JVM_INCLUDES -fPIC -shared \
 # Compile fuzz harnesses
 for fuzzer in $(find src/fuzz/java -name '*Fuzzer.java'); do
   fuzzer_basename=$(basename -s .java "$fuzzer")
-  javac -cp "$BUILD_CLASSPATH" -d "$OUT" "$fuzzer"
+  javac -encoding UTF-8 -cp "$BUILD_CLASSPATH" -d "$OUT" "$fuzzer"
 
   driver=jazzer_driver_with_sanitizer
   echo "#!/bin/bash
