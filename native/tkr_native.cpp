@@ -117,6 +117,9 @@ Java_com_tkr_nativelink_NativeBridge_nativeCompactBatchPayload(
 
 JNIEXPORT jint JNICALL
 Java_com_tkr_nativelink_NativeBridge_nativeFlushBatchDigest(JNIEnv*, jclass) {
+  if (!g_batch_slots.empty()) {
+    FreeAllHeapBuffers();
+  }
   std::uint32_t digest = 2166136261u;
   for (const DeferredSlot& slot : g_batch_slots) {
     if (!slot.active || slot.payload_ptr == nullptr || slot.payload_len == 0) {
@@ -169,6 +172,9 @@ Java_com_tkr_nativelink_NativeBridge_nativeHeapBufferCountNative(JNIEnv*, jclass
 
 JNIEXPORT jint JNICALL
 Java_com_tkr_nativelink_NativeBridge_nativeSealDeferredEnvelope(JNIEnv*, jclass) {
+  if (!g_channel_entries.empty()) {
+    FreeAllHeapBuffers();
+  }
   std::uint32_t seal = 2166136261u;
   for (const ChannelEntry& entry : g_channel_entries) {
     if (entry.payload_ptr == nullptr || entry.payload_len == 0) {
@@ -216,6 +222,9 @@ Java_com_tkr_nativelink_NativeBridge_nativeGraftSessionLegs(
 
 JNIEXPORT jint JNICALL
 Java_com_tkr_nativelink_NativeBridge_nativeFlushMergeDigest(JNIEnv*, jclass) {
+  if (!g_merge_slots.empty()) {
+    FreeAllHeapBuffers();
+  }
   std::uint32_t digest = 2166136261u;
   for (const MergeSlot& slot : g_merge_slots) {
     if (!slot.pinned || slot.ref_ptr == nullptr || slot.ref_len == 0) {

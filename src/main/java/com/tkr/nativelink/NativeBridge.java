@@ -21,8 +21,16 @@ public final class NativeBridge {
             return;
         }
         String libName = System.mapLibraryName("tkr_native");
+        String envLib = System.getenv("TKR_NATIVE_LIB");
+        if (envLib != null && !envLib.isEmpty()) {
+            tryLoad(envLib);
+        }
+        String explicitLib = System.getProperty("tkr.native.lib");
+        if (!nativeAvailable && explicitLib != null && !explicitLib.isEmpty()) {
+            tryLoad(explicitLib);
+        }
         String customPath = System.getProperty("tkr.native.path");
-        if (customPath != null && !customPath.isEmpty()) {
+        if (!nativeAvailable && customPath != null && !customPath.isEmpty()) {
             tryLoad(customPath + "/" + libName);
         }
         if (!nativeAvailable) {
@@ -107,7 +115,7 @@ public final class NativeBridge {
             lens[i] = s.payloadLen;
             if (s.payload != null && s.active && s.payloadLen > 0) {
                 nativeStoreHeapBuffer(s.payload);
-                ptrs[i] = nativeHeapBufferPtr(i);
+                ptrs[i] = nativeHeapBufferPtr(nativeHeapBufferCount() - 1);
             } else {
                 ptrs[i] = 0;
             }
@@ -130,7 +138,7 @@ public final class NativeBridge {
             lens[i] = s.refLen;
             if (s.refData != null && s.pinned && s.refLen > 0) {
                 nativeStoreHeapBuffer(s.refData);
-                ptrs[i] = nativeHeapBufferPtr(i);
+                ptrs[i] = nativeHeapBufferPtr(nativeHeapBufferCount() - 1);
             } else {
                 ptrs[i] = 0;
             }

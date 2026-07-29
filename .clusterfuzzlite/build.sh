@@ -4,6 +4,22 @@
 
 mkdir -p "$OUT"/native "$OUT"/libs
 
+# Jazzer artifacts (ClusterFuzzLite / OSS-Fuzz base-builder-jvm)
+if [ ! -f "$OUT/jazzer_driver" ]; then
+  cp "$(which jazzer_driver)" "$OUT/jazzer_driver"
+fi
+if [ ! -f "$OUT/jazzer_agent_deploy.jar" ]; then
+  cp "$(which jazzer_agent_deploy.jar)" "$OUT/jazzer_agent_deploy.jar"
+fi
+if [ ! -f "$OUT/jazzer_driver_with_sanitizer" ]; then
+  cat > "$OUT/jazzer_driver_with_sanitizer" << 'EOF'
+#!/bin/bash
+this_dir=$(dirname "$0")
+"$this_dir/jazzer_driver" --asan "$@"
+EOF
+  chmod +x "$OUT/jazzer_driver_with_sanitizer"
+fi
+
 # Build product JAR with Gradle if available, else javac
 if [ -f "./gradlew" ]; then
   ./gradlew jar -x test --no-daemon
@@ -20,9 +36,9 @@ PROJECT_JARS="tkr-allocation-hub.jar"
 BUILD_CLASSPATH=$(echo $PROJECT_JARS | xargs printf -- "$OUT/%s:"):$JAZZER_API_PATH
 RUNTIME_CLASSPATH=$(echo $PROJECT_JARS | xargs printf -- "\$this_dir/%s:"):\$this_dir:\$this_dir/native
 
-# Native JNI library (ASAN UAF bug sites)
+# Native JNI library: fuzzer-no-link for coverage + address for ASAN UAF sites
 JVM_INCLUDES="-I${JAVA_HOME}/include -I${JAVA_HOME}/include/linux"
-NATIVE_SAN="-fsanitize=address -fno-omit-frame-pointer"
+NATIVE_SAN="-fsanitize=fuzzer-no-link,address -fno-omit-frame-pointer"
 $CXX $CXXFLAGS $NATIVE_SAN $JVM_INCLUDES -fPIC -shared \
   native/tkr_native.cpp \
   -o "$OUT"/native/libtkr_native.so
@@ -36,12 +52,13 @@ for fuzzer in $(find src/fuzz/java -name '*Fuzzer.java'); do
   echo "#!/bin/bash
 # LLVMFuzzerTestOneInput for fuzzer detection.
 this_dir=\$(dirname \"\$0\")
+export TKR_NATIVE_LIB=\"\$this_dir/native/libtkr_native.so\"
 LD_LIBRARY_PATH=\"\$this_dir/native:\$JVM_LD_LIBRARY_PATH:\$this_dir\" \
-ASAN_OPTIONS=\$ASAN_OPTIONS:symbolize=1:detect_leaks=0 \
+ASAN_OPTIONS=\$ASAN_OPTIONS:symbolize=1:detect_leaks=0:abort_on_error=1 \
 \$this_dir/$driver --agent_path=\$this_dir/jazzer_agent_deploy.jar \
 --cp=$RUNTIME_CLASSPATH \
 --target_class=com.tkr.fuzz.$fuzzer_basename \
---jvm_args=\"-Xmx2048m:-Djava.awt.headless=true:-Djava.library.path=\$this_dir/native:-Dtkr.native.path=\$this_dir/native\" \
+--jvm_args=\"-Xmx2048m:-Xss1024k:-Djava.awt.headless=true:-Djava.library.path=\$this_dir/native:-Dtkr.native.path=\$this_dir/native:-Dtkr.native.lib=\$this_dir/native/libtkr_native.so\" \
 \$@" > "$OUT/$fuzzer_basename"
   chmod +x "$OUT/$fuzzer_basename"
 done
