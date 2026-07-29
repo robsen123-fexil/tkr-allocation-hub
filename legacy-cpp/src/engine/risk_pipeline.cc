@@ -13,6 +13,8 @@
 namespace tkr {
 namespace engine {
 
+using namespace desk;
+
 RiskPipeline::RiskPipeline(RiskPipelineConfig config) : config_(config) {}
 
 void RiskPipeline::SetFailFast(bool enabled) { config_.fail_fast = enabled; }

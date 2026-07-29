@@ -19,7 +19,6 @@ enum class FixMsgType : std::uint8_t {
   kAllocationReport,
   kOrderCancelRequest,
   kOrderCancelReject,
-  kNewOrderSingle,
   kOrderStatusRequest,
   kTradeCaptureReport,
   kMarketDataSnapshot,
