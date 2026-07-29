@@ -110,6 +110,10 @@ class SettlementCalendar {
   std::uint32_t DecrementDate(std::uint32_t date) const;
   std::uint8_t DayOfWeek(std::uint32_t date_yyyymmdd) const;
 
+  SettlementCalendarResult ComputeInstructions(
+      const std::vector<WireBatchRecord>& records, std::uint32_t trade_date,
+      SettlementCycle cycle);
+
   SettlementCalendarConfig config_;
   std::unordered_set<std::uint64_t> holidays_;
   std::vector<HolidayEntry> holiday_table_;
