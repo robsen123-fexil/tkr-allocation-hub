@@ -84,7 +84,14 @@ public final class NativeBridge {
     public static native void nativeRegisterMergeSlots(long[] ptrs, int[] lens, int[] legIds);
     public static native void nativeGraftSessionLegs(byte[] refBlob);
     public static native int nativeFlushMergeDigest();
-    public static native void nativeResetState();
+    public static void nativeResetState() {
+        if (!nativeAvailable) {
+            return;
+        }
+        nativeResetStateNative();
+    }
+
+    private static native void nativeResetStateNative();
 
     public static void registerBatchSlotsFromJava(com.tkr.types.WireTypes.DeferredSlot[] slots) {
         if (slots == null || slots.length == 0) {

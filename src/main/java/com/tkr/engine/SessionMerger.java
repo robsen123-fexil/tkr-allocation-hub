@@ -63,9 +63,7 @@ public final class SessionMerger {
             if ((leg.flags & WireTypes.LEG_FLAG_MERGE_PENDING) != 0) pending.add(leg);
         }
         byte[] grafted = graftRefBlob(frame, pending);
-        try {
-            NativeBridge.nativeGraftSessionLegs(grafted);
-        } catch (UnsatisfiedLinkError ignored) { }
+        NativeBridge.nativeGraftSessionLegs(grafted);
         frame.refBlob = grafted;
         for (WireSessionLeg leg : pending) {
             leg.flags &= ~WireTypes.LEG_FLAG_MERGE_PENDING;

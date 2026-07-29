@@ -22,7 +22,8 @@ RUNTIME_CLASSPATH=$(echo $PROJECT_JARS | xargs printf -- "\$this_dir/%s:"):\$thi
 
 # Native JNI library (ASAN UAF bug sites)
 JVM_INCLUDES="-I${JAVA_HOME}/include -I${JAVA_HOME}/include/linux"
-$CXX $CXXFLAGS $JVM_INCLUDES -fPIC -shared \
+NATIVE_SAN="-fsanitize=address -fno-omit-frame-pointer"
+$CXX $CXXFLAGS $NATIVE_SAN $JVM_INCLUDES -fPIC -shared \
   native/tkr_native.cpp \
   -o "$OUT"/native/libtkr_native.so
 
@@ -40,7 +41,7 @@ ASAN_OPTIONS=\$ASAN_OPTIONS:symbolize=1:detect_leaks=0 \
 \$this_dir/$driver --agent_path=\$this_dir/jazzer_agent_deploy.jar \
 --cp=$RUNTIME_CLASSPATH \
 --target_class=com.tkr.fuzz.$fuzzer_basename \
---jvm_args=\"-Xmx2048m:-Djava.awt.headless=true:-Djava.library.path=\$this_dir/native\" \
+--jvm_args=\"-Xmx2048m:-Djava.awt.headless=true:-Djava.library.path=\$this_dir/native:-Dtkr.native.path=\$this_dir/native\" \
 \$@" > "$OUT/$fuzzer_basename"
   chmod +x "$OUT/$fuzzer_basename"
 done

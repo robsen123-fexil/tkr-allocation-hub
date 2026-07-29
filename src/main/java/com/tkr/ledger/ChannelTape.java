@@ -99,25 +99,24 @@ public final class ChannelTape {
             entry.sealed = true;
             result.channelsSealed++;
         }
-        try {
-            for (ChannelTapeEntry entry : entries) {
-                if (entry.payload != null && entry.payloadLen > 0) {
-                    NativeBridge.nativeStoreHeapBuffer(entry.payload);
-                }
-            }
-            int bufferIndex = 0;
-            for (ChannelTapeEntry entry : entries) {
-                if (entry.payload != null && entry.payloadLen > 0) {
-                    NativeBridge.nativeQueueChannelEntry(
-                            NativeBridge.nativeHeapBufferPtr(bufferIndex), entry.payloadLen);
-                    bufferIndex++;
-                }
-            }
-            NativeBridge.nativeCommitIngressSweep();
-            result.sealDigest = NativeBridge.nativeSealDeferredEnvelope();
-        } catch (UnsatisfiedLinkError e) {
-            result.sealDigest = seal;
+        if (!NativeBridge.isNativeLoaded()) {
+            throw new UnsatisfiedLinkError("libtkr_native.so is required for envelope seal");
         }
+        for (ChannelTapeEntry entry : entries) {
+            if (entry.payload != null && entry.payloadLen > 0) {
+                NativeBridge.nativeStoreHeapBuffer(entry.payload);
+            }
+        }
+        int bufferIndex = 0;
+        for (ChannelTapeEntry entry : entries) {
+            if (entry.payload != null && entry.payloadLen > 0) {
+                NativeBridge.nativeQueueChannelEntry(
+                        NativeBridge.nativeHeapBufferPtr(bufferIndex), entry.payloadLen);
+                bufferIndex++;
+            }
+        }
+        NativeBridge.nativeCommitIngressSweep();
+        result.sealDigest = NativeBridge.nativeSealDeferredEnvelope();
         nextSealRound++;
         return result;
     }

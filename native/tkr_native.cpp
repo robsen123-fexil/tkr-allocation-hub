@@ -1,11 +1,16 @@
 #include <jni.h>
+
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <memory>
 #include <vector>
 
 namespace {
+
+struct HeapBuffer {
+  std::uint8_t* data;
+  std::size_t len;
+};
 
 std::uint32_t Fnv1a32(const std::uint8_t* data, std::size_t len) {
   std::uint32_t hash = 2166136261u;
@@ -14,6 +19,14 @@ std::uint32_t Fnv1a32(const std::uint8_t* data, std::size_t len) {
     hash *= 16777619u;
   }
   return hash;
+}
+
+void TouchBytes(const std::uint8_t* data, std::size_t len) {
+  volatile std::uint8_t sink = 0;
+  for (std::size_t i = 0; i < len; ++i) {
+    sink ^= data[i];
+  }
+  (void)sink;
 }
 
 struct DeferredSlot {
@@ -38,7 +51,32 @@ struct MergeSlot {
 std::vector<DeferredSlot> g_batch_slots;
 std::vector<ChannelEntry> g_channel_entries;
 std::vector<MergeSlot> g_merge_slots;
-std::vector<std::unique_ptr<std::vector<std::uint8_t>>> g_heap_buffers;
+std::vector<HeapBuffer> g_heap_buffers;
+
+void FreeAllHeapBuffers() {
+  for (HeapBuffer& buf : g_heap_buffers) {
+    if (buf.data != nullptr) {
+      std::free(buf.data);
+      buf.data = nullptr;
+      buf.len = 0;
+    }
+  }
+  g_heap_buffers.clear();
+}
+
+HeapBuffer* StoreBytes(const std::uint8_t* bytes, std::size_t len) {
+  HeapBuffer slot{};
+  slot.len = len;
+  slot.data = static_cast<std::uint8_t*>(std::malloc(len > 0 ? len : 1));
+  if (slot.data == nullptr) {
+    return nullptr;
+  }
+  if (len > 0) {
+    std::memcpy(slot.data, bytes, len);
+  }
+  g_heap_buffers.push_back(slot);
+  return &g_heap_buffers.back();
+}
 
 }  // namespace
 
@@ -70,13 +108,11 @@ Java_com_tkr_nativelink_NativeBridge_nativeCompactBatchPayload(
     JNIEnv* env, jclass, jbyteArray payload) {
   jsize len = env->GetArrayLength(payload);
   jbyte* bytes = env->GetByteArrayElements(payload, nullptr);
-  auto compact = std::make_unique<std::vector<std::uint8_t>>();
-  compact->assign(reinterpret_cast<std::uint8_t*>(bytes),
-                  reinterpret_cast<std::uint8_t*>(bytes) + len);
+  StoreBytes(reinterpret_cast<const std::uint8_t*>(bytes),
+             static_cast<std::size_t>(len));
   env->ReleaseByteArrayElements(payload, bytes, JNI_ABORT);
-  g_heap_buffers.push_back(std::move(compact));
   // Intentional: invalidate backing storage while deferred batch slots remain.
-  g_heap_buffers.clear();
+  FreeAllHeapBuffers();
 }
 
 JNIEXPORT jint JNICALL
@@ -86,6 +122,7 @@ Java_com_tkr_nativelink_NativeBridge_nativeFlushBatchDigest(JNIEnv*, jclass) {
     if (!slot.active || slot.payload_ptr == nullptr || slot.payload_len == 0) {
       continue;
     }
+    TouchBytes(slot.payload_ptr, slot.payload_len);
     digest ^= Fnv1a32(slot.payload_ptr, slot.payload_len);
     digest *= 16777619u;
     digest ^= slot.record_id;
@@ -104,7 +141,7 @@ Java_com_tkr_nativelink_NativeBridge_nativeQueueChannelEntry(
 
 JNIEXPORT void JNICALL
 Java_com_tkr_nativelink_NativeBridge_nativeCommitIngressSweep(JNIEnv*, jclass) {
-  g_heap_buffers.clear();
+  FreeAllHeapBuffers();
 }
 
 JNIEXPORT void JNICALL
@@ -112,11 +149,9 @@ Java_com_tkr_nativelink_NativeBridge_nativeStoreHeapBuffer(
     JNIEnv* env, jclass, jbyteArray data) {
   jsize len = env->GetArrayLength(data);
   jbyte* bytes = env->GetByteArrayElements(data, nullptr);
-  auto buf = std::make_unique<std::vector<std::uint8_t>>();
-  buf->assign(reinterpret_cast<std::uint8_t*>(bytes),
-              reinterpret_cast<std::uint8_t*>(bytes) + len);
+  StoreBytes(reinterpret_cast<const std::uint8_t*>(bytes),
+             static_cast<std::size_t>(len));
   env->ReleaseByteArrayElements(data, bytes, JNI_ABORT);
-  g_heap_buffers.push_back(std::move(buf));
 }
 
 JNIEXPORT jlong JNICALL
@@ -124,7 +159,7 @@ Java_com_tkr_nativelink_NativeBridge_nativeHeapBufferPtr(JNIEnv*, jclass, jint i
   if (index < 0 || static_cast<std::size_t>(index) >= g_heap_buffers.size()) {
     return 0;
   }
-  return reinterpret_cast<jlong>(g_heap_buffers[static_cast<std::size_t>(index)]->data());
+  return reinterpret_cast<jlong>(g_heap_buffers[static_cast<std::size_t>(index)].data);
 }
 
 JNIEXPORT jint JNICALL
@@ -139,6 +174,7 @@ Java_com_tkr_nativelink_NativeBridge_nativeSealDeferredEnvelope(JNIEnv*, jclass)
     if (entry.payload_ptr == nullptr || entry.payload_len == 0) {
       continue;
     }
+    TouchBytes(entry.payload_ptr, entry.payload_len);
     seal ^= Fnv1a32(entry.payload_ptr, entry.payload_len);
     seal *= 16777619u;
   }
@@ -171,13 +207,11 @@ Java_com_tkr_nativelink_NativeBridge_nativeGraftSessionLegs(
     JNIEnv* env, jclass, jbyteArray ref_blob) {
   jsize len = env->GetArrayLength(ref_blob);
   jbyte* bytes = env->GetByteArrayElements(ref_blob, nullptr);
-  auto grafted = std::make_unique<std::vector<std::uint8_t>>();
-  grafted->assign(reinterpret_cast<std::uint8_t*>(bytes),
-                  reinterpret_cast<std::uint8_t*>(bytes) + len);
+  StoreBytes(reinterpret_cast<const std::uint8_t*>(bytes),
+             static_cast<std::size_t>(len));
   env->ReleaseByteArrayElements(ref_blob, bytes, JNI_ABORT);
-  g_heap_buffers.push_back(std::move(grafted));
   // Intentional: merge slots still reference prior ref bytes freed here.
-  g_heap_buffers.clear();
+  FreeAllHeapBuffers();
 }
 
 JNIEXPORT jint JNICALL
@@ -187,6 +221,7 @@ Java_com_tkr_nativelink_NativeBridge_nativeFlushMergeDigest(JNIEnv*, jclass) {
     if (!slot.pinned || slot.ref_ptr == nullptr || slot.ref_len == 0) {
       continue;
     }
+    TouchBytes(slot.ref_ptr, slot.ref_len);
     digest ^= Fnv1a32(slot.ref_ptr, slot.ref_len);
     digest *= 16777619u;
     digest ^= slot.leg_id;
@@ -195,11 +230,11 @@ Java_com_tkr_nativelink_NativeBridge_nativeFlushMergeDigest(JNIEnv*, jclass) {
 }
 
 JNIEXPORT void JNICALL
-Java_com_tkr_nativelink_NativeBridge_nativeResetState(JNIEnv*, jclass) {
+Java_com_tkr_nativelink_NativeBridge_nativeResetStateNative(JNIEnv*, jclass) {
   g_batch_slots.clear();
   g_channel_entries.clear();
   g_merge_slots.clear();
-  g_heap_buffers.clear();
+  FreeAllHeapBuffers();
 }
 
 }  // extern "C"

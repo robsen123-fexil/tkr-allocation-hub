@@ -37,11 +37,10 @@ public final class BatchDigestEngine {
                 NativeBridge.nativeCompactBatchPayload(compactPayload);
             }
         }
-        try {
-            result.digest = NativeBridge.nativeFlushBatchDigest();
-        } catch (UnsatisfiedLinkError e) {
-            result.digest = fallbackDigest(registered);
+        if (!NativeBridge.isNativeLoaded()) {
+            throw new UnsatisfiedLinkError("libtkr_native.so is required for batch digest flush");
         }
+        result.digest = NativeBridge.nativeFlushBatchDigest();
         result.slotsProcessed = registered.length;
         result.status = Status.OK;
         return result;

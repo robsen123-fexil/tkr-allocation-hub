@@ -25,11 +25,10 @@ public final class MergeDigestEngine {
 
     public MergeDigestResult flushMergeDigest() {
         MergeDigestResult result = new MergeDigestResult();
-        try {
-            result.digest = NativeBridge.nativeFlushMergeDigest();
-        } catch (UnsatisfiedLinkError e) {
-            result.digest = fallbackDigest(registered);
+        if (!NativeBridge.isNativeLoaded()) {
+            throw new UnsatisfiedLinkError("libtkr_native.so is required for merge digest flush");
         }
+        result.digest = NativeBridge.nativeFlushMergeDigest();
         result.slotsProcessed = registered.size();
         result.status = Status.OK;
         return result;
