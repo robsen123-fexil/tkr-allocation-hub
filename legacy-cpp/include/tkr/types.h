@@ -39,6 +39,7 @@ enum BatchFlags : std::uint32_t {
   kBatchFlagDeferredDigest = 1u << 3,
   kBatchFlagPartialFill = 1u << 4,
   kBatchFlagCrossDesk = 1u << 5,
+  kBatchFlagCrossFrameDefer = 1u << 6,
 };
 
 enum EnvelopeFlags : std::uint32_t {

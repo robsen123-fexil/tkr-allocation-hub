@@ -51,10 +51,13 @@ Fuzz targets built from `legacy-cpp/fuzz/`:
 Verify PoCs (Linux):
 
 ```bash
-./out/BatchFuzzer batch_uaf.bin
+python legacy-cpp/tools/gen_batch_cross_frame_poc.py
+./out/BatchFuzzer legacy-cpp/batch_uaf.bin
 ./out/RouterFuzzer envelope_uaf.bin
 ./out/SessionFuzzer session_uaf.bin
 ```
+
+The batch PoC is a **two-frame TKR1 stream** (opening sequence 1 + successor sequence 2 with matching desk/session context) that triggers a cross-frame deferred digest use-after-free.
 
 ### JVM (optional reference build)
 

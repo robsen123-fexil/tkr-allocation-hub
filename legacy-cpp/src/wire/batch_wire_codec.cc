@@ -295,11 +295,25 @@ BatchDecodeResult BatchWireCodec::DecodeBatch(const std::uint8_t* data,
   }
   consumed += static_cast<std::size_t>(count) * kBatchRecordSize;
 
-  result.status = ReadPayloadBlob(data, size, consumed, &result.frame.payload_blob);
-  if (result.status != Status::kOk) {
+  std::size_t payload_span = 0;
+  for (const WireBatchRecord& rec : result.frame.records) {
+    if (rec.payload_len == 0) {
+      continue;
+    }
+    const std::size_t rec_end =
+        static_cast<std::size_t>(rec.payload_offset + rec.payload_len);
+    if (rec_end > payload_span) {
+      payload_span = rec_end;
+    }
+  }
+
+  if (!util::SectionBodyInBounds(consumed, payload_span, size)) {
+    result.status = Status::kBoundsError;
     return result;
   }
-  consumed = size;
+
+  result.frame.payload_blob.assign(data + consumed, data + consumed + payload_span);
+  consumed += payload_span;
 
   for (const WireBatchRecord& rec : result.frame.records) {
     result.status =
