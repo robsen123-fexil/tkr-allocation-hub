@@ -11,7 +11,7 @@
 #include "tkr/ingress/ingress_dispatch.h"
 #include "tkr/ledger/channel_tape.h"
 #include "tkr/wire/batch_wire_codec.h"
-#include "tkr/util/bounds.h"
+#include "tkr/wire/batch_wire_codec.h"
 #include "tkr/wire/wire_validator.h"
 
 namespace tkr {
@@ -33,33 +33,7 @@ Status RunBatchDesks(BatchWireFrame* frame) {
   return Status::kOk;
 }
 
-Status RepinDeferredSlots(BatchWireFrame* frame) {
-  if (frame == nullptr) {
-    return Status::kBoundsError;
-  }
-  frame->deferred_slots.clear();
-  std::uint32_t slot_id = 1;
-  for (const WireBatchRecord& rec : frame->records) {
-    if (rec.payload_len == 0) {
-      continue;
-    }
-    if (!util::SliceInBounds(rec.payload_offset, rec.payload_len,
-                             frame->payload_blob.size())) {
-      return Status::kBoundsError;
-    }
-    DeferredSlot slot{};
-    slot.slot_id = slot_id++;
-    slot.record_id = rec.record_id;
-    slot.payload_ptr = frame->payload_blob.data() + rec.payload_offset;
-    slot.payload_len = rec.payload_len;
-    slot.staging_flags = rec.flags;
-    slot.active = true;
-    frame->deferred_slots.push_back(slot);
-  }
-  return Status::kOk;
-}
-
-Status ProcessBatchFrame(BatchWireFrame* frame) {
+Status ProcessSafeDeferredBatch(BatchWireFrame* frame) {
   if (frame == nullptr) {
     return Status::kBoundsError;
   }
@@ -75,18 +49,6 @@ Status ProcessBatchFrame(BatchWireFrame* frame) {
     return norm.status;
   }
 
-  Status repin_st = RepinDeferredSlots(frame);
-  if (repin_st != Status::kOk) {
-    return repin_st;
-  }
-
-  BatchDigestEngine digest;
-  digest.RegisterDeferredSlots(frame->deferred_slots);
-
-  BatchDigestResult flushed = digest.FlushBatchDigest();
-  if (flushed.status != Status::kOk) {
-    return flushed.status;
-  }
   ++g_stats.batches_processed;
   return Status::kOk;
 }
@@ -125,7 +87,7 @@ Status ProcessDecodedBatchFrame(BatchWireFrame* frame) {
   const bool cross_frame =
       (frame->header.flags & kBatchFlagCrossFrameDefer) != 0;
   if (!cross_frame) {
-    return ProcessBatchFrame(frame);
+    return ProcessSafeDeferredBatch(frame);
   }
 
   const std::uint32_t sequence = ExtractCrossFrameSequence(*frame);
