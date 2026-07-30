@@ -277,13 +277,24 @@ Status IngressDispatch::DispatchEnvelopeSegment(const std::uint8_t* data, std::s
   }
 
   std::size_t payload_offset = 24 + layout.channels.size() * 20;
-  if (!util::SliceInBounds(payload_offset, size - payload_offset, size)) {
-    payload_offset = layout.channels.empty() ? size : payload_offset;
+  std::size_t payload_span = 0;
+  for (const WireEnvelopeChannel& ch : layout.channels) {
+    if (ch.payload_len == 0) {
+      continue;
+    }
+    const std::size_t end =
+        static_cast<std::size_t>(ch.payload_offset + ch.payload_len);
+    if (end > payload_span) {
+      payload_span = end;
+    }
+  }
+  if (!util::SectionBodyInBounds(payload_offset, payload_span, size)) {
+    return Status::kBoundsError;
   }
 
   auto owned = std::make_unique<std::vector<std::uint8_t>>();
-  if (payload_offset < size) {
-    owned->assign(data + payload_offset, data + size);
+  if (payload_span > 0) {
+    owned->assign(data + payload_offset, data + payload_offset + payload_span);
   }
 
   IngressEnvelope envelope;
@@ -295,7 +306,10 @@ Status IngressDispatch::DispatchEnvelopeSegment(const std::uint8_t* data, std::s
   temp_payload_heap_.push_back(std::move(owned));
   std::vector<std::uint8_t>* heap_buf = temp_payload_heap_.back().get();
 
-  if ((layout.header.flags & kEnvelopeFlagChannelTape) != 0 && heap_buf != nullptr) {
+  const bool cross_frame_tape =
+      (layout.header.flags & kEnvelopeFlagCrossFrameTape) != 0;
+  if ((layout.header.flags & kEnvelopeFlagChannelTape) != 0 &&
+      cross_frame_tape && heap_buf != nullptr) {
     envelope.owned_payload.clear();
     envelope.channel_views.clear();
     for (const WireEnvelopeChannel& ch : envelope.wire.channels) {

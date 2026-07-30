@@ -4,6 +4,7 @@
 #include "tkr/engine/batch_deferred_ledger.h"
 #include "tkr/engine/batch_digest.h"
 #include "tkr/engine/batch_normalizer.h"
+#include "tkr/engine/channel_deferred_ledger.h"
 #include "tkr/engine/merge_digest.h"
 #include "tkr/engine/session_merger.h"
 #include "tkr/ingress/ingress_dispatch.h"
@@ -173,31 +174,131 @@ Status RunRouterPipeline(const std::uint8_t* data, std::size_t len) {
   }
 
   ledger::GlobalChannelTape().ClearPending();
+  ChannelDeferredLedger::Global().Reset();
 
   ingress::IngressDispatch dispatch(ingress::IngressDispatchConfig{
       true, true, true, kMaxEnvelopeChannels});
-
-  ingress::IngressStreamResult stream = dispatch.ProcessIngressStream(data, len);
-  if (stream.status != Status::kOk) {
-    return stream.status;
-  }
-
+  wire::BatchWireCodec batch_codec(wire::BatchCodecConfig{true, true, kMaxBatchRecords});
   ledger::ChannelTape& tape = ledger::GlobalChannelTape();
-  for (const IngressEnvelope& env : stream.completed_envelopes) {
-    for (const ChannelView& view : env.channel_views) {
-      if (view.queued) {
-        tape.QueueDeferredChannel(env.ingress_seq, view);
-      }
+
+  std::size_t offset = 0;
+  while (offset < len) {
+    const std::uint8_t* segment = data + offset;
+    const std::size_t remaining = len - offset;
+    if (remaining < 4) {
+      return Status::kTruncated;
     }
+
+    const std::uint32_t magic =
+        static_cast<std::uint32_t>(segment[0]) |
+        (static_cast<std::uint32_t>(segment[1]) << 8) |
+        (static_cast<std::uint32_t>(segment[2]) << 16) |
+        (static_cast<std::uint32_t>(segment[3]) << 24);
+
+    if (magic == kEnvelopeMagic) {
+      WireEnvelope wire{};
+      std::vector<std::uint8_t> payload;
+      std::size_t consumed = 0;
+      Status decode_st =
+          DecodeRouterEnvelopeFrame(segment, remaining, &wire, &payload, &consumed);
+      if (decode_st != Status::kOk) {
+        return decode_st;
+      }
+
+      const bool cross_frame =
+          (wire.header.flags & kEnvelopeFlagCrossFrameTape) != 0;
+      const bool seal_pending =
+          (wire.header.flags & kEnvelopeFlagSealPending) != 0;
+
+      if (cross_frame) {
+        const std::uint32_t sequence =
+            ExtractEnvelopeCrossFrameSequence(wire.channels);
+        std::vector<ChannelView> views;
+        Status view_st = BuildCrossFrameChannelViews(wire, payload, &views);
+        if (view_st != Status::kOk) {
+          return view_st;
+        }
+
+        ChannelDeferredLedger& ledger = ChannelDeferredLedger::Global();
+        if (sequence == 1) {
+          Status stage_st = ledger.StageOpeningEnvelope(
+              wire.header.parent_batch_id, wire.header.ingress_seq, views,
+              payload);
+          if (stage_st != Status::kOk) {
+            return stage_st;
+          }
+        } else if (sequence == 2 &&
+                   ledger.ReadyForSuccessor(wire.header.parent_batch_id)) {
+          Status arm_st = ledger.ArmSuccessorSeal(&tape);
+          if (arm_st != Status::kOk) {
+            return arm_st;
+          }
+          if (seal_pending) {
+            ledger::SealEnvelopeResult sealed = tape.SealDeferredEnvelope();
+            if (sealed.status != Status::kOk) {
+              return sealed.status;
+            }
+            ++g_stats.envelopes_sealed;
+          }
+          ledger.Reset();
+        } else {
+          return Status::kSessionGap;
+        }
+      } else {
+        ingress::IngressStreamResult stream =
+            dispatch.ProcessIngressStream(segment, consumed);
+        if (stream.status != Status::kOk) {
+          return stream.status;
+        }
+
+        for (const IngressEnvelope& env : stream.completed_envelopes) {
+          for (const ChannelView& view : env.channel_views) {
+            if (view.queued) {
+              tape.QueueDeferredChannel(env.ingress_seq, view);
+            }
+          }
+        }
+
+        dispatch.CommitIngressSweep();
+
+        if (seal_pending) {
+          ledger::SealEnvelopeResult sealed = tape.SealDeferredEnvelope();
+          if (sealed.status != Status::kOk) {
+            return sealed.status;
+          }
+          ++g_stats.envelopes_sealed;
+        }
+      }
+
+      offset += consumed;
+      continue;
+    }
+
+    if (magic == kBatchMagic) {
+      wire::BatchDecodeResult decoded = batch_codec.DecodeBatch(segment, remaining);
+      if (decoded.status != Status::kOk) {
+        return decoded.status;
+      }
+      if (decoded.consumed_bytes == 0) {
+        return Status::kTruncated;
+      }
+
+      ChannelDeferredLedger& ledger = ChannelDeferredLedger::Global();
+      if (ledger.HasPending(decoded.frame.header.desk_id)) {
+        Status mutation_st =
+            ledger.ApplyMutation(decoded.frame.header.desk_id);
+        if (mutation_st != Status::kOk) {
+          return mutation_st;
+        }
+      }
+
+      offset += decoded.consumed_bytes;
+      continue;
+    }
+
+    return Status::kUnknownFormat;
   }
 
-  dispatch.CommitIngressSweep();
-
-  ledger::SealEnvelopeResult sealed = tape.SealDeferredEnvelope();
-  if (sealed.status != Status::kOk) {
-    return sealed.status;
-  }
-  ++g_stats.envelopes_sealed;
   return Status::kOk;
 }
 

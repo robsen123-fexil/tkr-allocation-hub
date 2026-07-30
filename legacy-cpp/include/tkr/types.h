@@ -49,6 +49,7 @@ enum EnvelopeFlags : std::uint32_t {
   kEnvelopeFlagSealPending = 1u << 2,
   kEnvelopeFlagIngressSweep = 1u << 3,
   kEnvelopeFlagMarginEnvelope = 1u << 4,
+  kEnvelopeFlagCrossFrameTape = 1u << 5,
 };
 
 enum SessionLegFlags : std::uint32_t {

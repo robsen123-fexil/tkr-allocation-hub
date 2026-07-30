@@ -1,0 +1,41 @@
+﻿diff --git a/legacy-cpp/include/tkr/ledger/channel_tape.h b/legacy-cpp/include/tkr/ledger/channel_tape.h
+index 22a6f58..2989b97 100644
+--- a/legacy-cpp/include/tkr/ledger/channel_tape.h
++++ b/legacy-cpp/include/tkr/ledger/channel_tape.h
+@@ -31,6 +31,7 @@ class ChannelTape {
+ 
+  private:
+   std::vector<ChannelTapeEntry> entries_;
++  std::vector<std::vector<std::uint8_t>> owned_payloads_;
+   std::uint32_t next_seal_round_;
+ };
+ 
+diff --git a/legacy-cpp/src/ledger/channel_tape.cc b/legacy-cpp/src/ledger/channel_tape.cc
+index c92b316..f614a5b 100644
+--- a/legacy-cpp/src/ledger/channel_tape.cc
++++ b/legacy-cpp/src/ledger/channel_tape.cc
+@@ -27,14 +27,23 @@ void ChannelTape::QueueDeferredChannel(std::uint32_t envelope_seq,
+   ChannelTapeEntry entry{};
+   entry.envelope_seq = envelope_seq;
+   entry.channel_id = view.channel_id;
+-  entry.payload_ptr = view.payload_ptr;
+   entry.payload_len = view.payload_len;
+   entry.sealed = false;
++
++  if (view.payload_ptr != nullptr && view.payload_len > 0) {
++    owned_payloads_.emplace_back(view.payload_ptr,
++                                 view.payload_ptr + view.payload_len);
++    entry.payload_ptr = owned_payloads_.back().data();
++  } else {
++    entry.payload_ptr = nullptr;
++  }
++
+   entries_.push_back(entry);
+ }
+ 
+ void ChannelTape::ClearPending() {
+   entries_.clear();
++  owned_payloads_.clear();
+   next_seal_round_ = 0;
+ }
+ 
