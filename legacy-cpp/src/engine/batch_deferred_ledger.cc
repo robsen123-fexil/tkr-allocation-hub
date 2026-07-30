@@ -22,12 +22,32 @@ void BatchDeferredLedger::Reset() {
   payload_arena_.clear();
   pending_slots_.clear();
   pending_active_ = false;
+  mutation_applied_ = false;
+  mutation_rounds_ = 0;
 }
 
 bool BatchDeferredLedger::HasPending(std::uint32_t session_id,
                                      std::uint32_t trade_date_yyyymmdd) const {
   return pending_active_ && pending_session_ == session_id &&
          pending_trade_date_ == trade_date_yyyymmdd && pending_sequence_ == 1;
+}
+
+bool BatchDeferredLedger::ReadyForSuccessor(
+    std::uint32_t session_id, std::uint32_t trade_date_yyyymmdd) const {
+  return pending_active_ && mutation_applied_ && mutation_rounds_ >= 2 &&
+         pending_session_ == session_id &&
+         pending_trade_date_ == trade_date_yyyymmdd && pending_sequence_ == 1;
+}
+
+Status BatchDeferredLedger::ApplyMutation(std::uint32_t session_id,
+                                          std::uint32_t trade_date_yyyymmdd) {
+  if (!pending_active_ || pending_session_ != session_id ||
+      pending_trade_date_ != trade_date_yyyymmdd) {
+    return Status::kSessionGap;
+  }
+  mutation_applied_ = true;
+  ++mutation_rounds_;
+  return Status::kOk;
 }
 
 Status BatchDeferredLedger::StageOpeningFrame(const BatchWireFrame& frame,
@@ -71,7 +91,8 @@ Status BatchDeferredLedger::StageOpeningFrame(const BatchWireFrame& frame,
 }
 
 Status BatchDeferredLedger::ArmSuccessorFlush(BatchDigestEngine* digest) {
-  if (!pending_active_ || digest == nullptr) {
+  if (!ReadyForSuccessor(pending_session_, pending_trade_date_) ||
+      digest == nullptr) {
     return Status::kSessionGap;
   }
 
@@ -82,6 +103,8 @@ Status BatchDeferredLedger::ArmSuccessorFlush(BatchDigestEngine* digest) {
   pending_active_ = false;
   pending_slots_.clear();
   pending_sequence_ = 0;
+  mutation_applied_ = false;
+  mutation_rounds_ = 0;
 
   digest->RegisterDeferredSlots(stale_slots);
   return Status::kOk;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build cross-frame BatchFuzzer PoC: two TKR1 frames concatenated."""
+"""Build cross-frame BatchFuzzer PoC: TKR1 open + 2 mutation rounds + TKR1 close."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def encode_record(
     )
 
 
-def encode_batch_frame(
+def encode_cross_frame_batch(
     sequence: int,
     data_record_id: int,
     payload_offset: int,
@@ -91,25 +91,45 @@ def encode_batch_frame(
     return header + meta + data + payload
 
 
+def encode_mutation_batch(round_id: int) -> bytes:
+    record = b"".join(
+        u32le(x)
+        for x in (round_id, 100 + round_id, 200, 5000, 250, 0, 16, 0)
+    )
+    payload = bytes([0xC0 + round_id + (i % 8) for i in range(16)])
+    header = b"".join(
+        [
+            u32le(K_BATCH_MAGIC),
+            u16le(K_WIRE_VERSION),
+            u16le(K_HEADER_BYTES),
+            u32le(1),
+            u32le(0),
+            u32le(SESSION_DESK_ID),
+            u32le(TRADE_DATE),
+            u32le(0),
+        ]
+    )
+    return header + record + payload
+
+
 def build_poc() -> bytes:
-    frame1_payload = bytes([0xA0 + (i % 16) for i in range(60)])
-    frame1 = encode_batch_frame(
+    opening = encode_cross_frame_batch(
         sequence=1,
         data_record_id=1,
         payload_offset=40,
         payload_len=20,
-        payload=frame1_payload,
+        payload=bytes([0xA0 + (i % 16) for i in range(60)]),
     )
-
-    frame2_payload = bytes([0xB0 + (i % 16) for i in range(24)])
-    frame2 = encode_batch_frame(
+    mutation_one = encode_mutation_batch(round_id=1)
+    mutation_two = encode_mutation_batch(round_id=2)
+    closing = encode_cross_frame_batch(
         sequence=2,
         data_record_id=2,
         payload_offset=0,
         payload_len=24,
-        payload=frame2_payload,
+        payload=bytes([0xB0 + (i % 16) for i in range(24)]),
     )
-    return frame1 + frame2
+    return opening + mutation_one + mutation_two + closing
 
 
 def main() -> None:

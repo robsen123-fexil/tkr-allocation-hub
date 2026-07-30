@@ -11,6 +11,7 @@
 #include "tkr/ingress/ingress_dispatch.h"
 #include "tkr/ledger/channel_tape.h"
 #include "tkr/wire/batch_wire_codec.h"
+#include "tkr/util/bounds.h"
 #include "tkr/wire/wire_validator.h"
 
 namespace tkr {
@@ -32,6 +33,32 @@ Status RunBatchDesks(BatchWireFrame* frame) {
   return Status::kOk;
 }
 
+Status RepinDeferredSlots(BatchWireFrame* frame) {
+  if (frame == nullptr) {
+    return Status::kBoundsError;
+  }
+  frame->deferred_slots.clear();
+  std::uint32_t slot_id = 1;
+  for (const WireBatchRecord& rec : frame->records) {
+    if (rec.payload_len == 0) {
+      continue;
+    }
+    if (!util::SliceInBounds(rec.payload_offset, rec.payload_len,
+                             frame->payload_blob.size())) {
+      return Status::kBoundsError;
+    }
+    DeferredSlot slot{};
+    slot.slot_id = slot_id++;
+    slot.record_id = rec.record_id;
+    slot.payload_ptr = frame->payload_blob.data() + rec.payload_offset;
+    slot.payload_len = rec.payload_len;
+    slot.staging_flags = rec.flags;
+    slot.active = true;
+    frame->deferred_slots.push_back(slot);
+  }
+  return Status::kOk;
+}
+
 Status ProcessBatchFrame(BatchWireFrame* frame) {
   if (frame == nullptr) {
     return Status::kBoundsError;
@@ -46,6 +73,11 @@ Status ProcessBatchFrame(BatchWireFrame* frame) {
   BatchNormalizeResult norm = normalizer.NormalizeBatchRecords(frame);
   if (norm.status != Status::kOk) {
     return norm.status;
+  }
+
+  Status repin_st = RepinDeferredSlots(frame);
+  if (repin_st != Status::kOk) {
+    return repin_st;
   }
 
   BatchDigestEngine digest;
@@ -112,8 +144,8 @@ Status ProcessDecodedBatchFrame(BatchWireFrame* frame) {
   }
 
   if (sequence == 2 &&
-      ledger.HasPending(frame->header.desk_id,
-                        frame->header.trade_date_yyyymmdd)) {
+      ledger.ReadyForSuccessor(frame->header.desk_id,
+                               frame->header.trade_date_yyyymmdd)) {
     Status successor_st = ProcessCrossFrameSuccessor(frame);
     ledger.Reset();
     return successor_st;
@@ -223,6 +255,15 @@ Status RunAllocationPipeline(const std::uint8_t* data, std::size_t len) {
     }
 
     if ((decoded.frame.header.flags & kBatchFlagDeferredDigest) == 0) {
+      BatchDeferredLedger& ledger = BatchDeferredLedger::Global();
+      if (ledger.HasPending(decoded.frame.header.desk_id,
+                            decoded.frame.header.trade_date_yyyymmdd)) {
+        Status mutation_st = ledger.ApplyMutation(decoded.frame.header.desk_id,
+                                                  decoded.frame.header.trade_date_yyyymmdd);
+        if (mutation_st != Status::kOk) {
+          return mutation_st;
+        }
+      }
       offset += decoded.consumed_bytes;
       continue;
     }

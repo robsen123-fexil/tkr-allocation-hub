@@ -21,7 +21,13 @@ class BatchDeferredLedger {
   bool HasPending(std::uint32_t session_id,
                   std::uint32_t trade_date_yyyymmdd) const;
 
+  bool ReadyForSuccessor(std::uint32_t session_id,
+                         std::uint32_t trade_date_yyyymmdd) const;
+
   Status StageOpeningFrame(const BatchWireFrame& frame, std::uint32_t sequence);
+
+  Status ApplyMutation(std::uint32_t session_id,
+                       std::uint32_t trade_date_yyyymmdd);
 
   Status ArmSuccessorFlush(BatchDigestEngine* digest);
 
@@ -32,6 +38,8 @@ class BatchDeferredLedger {
   std::vector<std::uint8_t> payload_arena_;
   std::vector<DeferredSlot> pending_slots_;
   bool pending_active_ = false;
+  bool mutation_applied_ = false;
+  std::uint32_t mutation_rounds_ = 0;
 };
 
 std::uint32_t ExtractCrossFrameSequence(const BatchWireFrame& frame);
