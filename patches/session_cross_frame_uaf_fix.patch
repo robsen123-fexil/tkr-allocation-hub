@@ -1,0 +1,40 @@
+﻿diff --git a/legacy-cpp/include/tkr/engine/merge_digest.h b/legacy-cpp/include/tkr/engine/merge_digest.h
+index 3cd4b65..eb4cc47 100644
+--- a/legacy-cpp/include/tkr/engine/merge_digest.h
++++ b/legacy-cpp/include/tkr/engine/merge_digest.h
+@@ -20,6 +20,7 @@ class MergeDigestEngine {
+ 
+  private:
+   std::vector<MergeSlot> pinned_slots_;
++  std::vector<std::vector<std::uint8_t>> owned_refs_;
+ };
+ 
+ }  // namespace engine
+diff --git a/legacy-cpp/src/engine/merge_digest.cc b/legacy-cpp/src/engine/merge_digest.cc
+index 04b6e8f..80398c1 100644
+--- a/legacy-cpp/src/engine/merge_digest.cc
++++ b/legacy-cpp/src/engine/merge_digest.cc
+@@ -30,7 +30,22 @@ std::uint32_t MixDigest(std::uint32_t hash, std::uint32_t value) {
+ 
+ void MergeDigestEngine::RegisterMergeSlots(
+     const std::vector<MergeSlot>& slots) {
+-  pinned_slots_ = slots;
++  pinned_slots_.clear();
++  owned_refs_.clear();
++  pinned_slots_.reserve(slots.size());
++  owned_refs_.reserve(slots.size());
++
++  for (const MergeSlot& slot : slots) {
++    if (!slot.pinned || slot.ref_ptr == nullptr || slot.ref_len == 0) {
++      pinned_slots_.push_back(slot);
++      continue;
++    }
++
++    owned_refs_.emplace_back(slot.ref_ptr, slot.ref_ptr + slot.ref_len);
++    MergeSlot owned = slot;
++    owned.ref_ptr = owned_refs_.back().data();
++    pinned_slots_.push_back(owned);
++  }
+ }
+ 
+ MergeDigestResult MergeDigestEngine::FlushMergeDigest() {

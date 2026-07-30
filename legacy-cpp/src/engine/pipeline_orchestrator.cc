@@ -5,6 +5,7 @@
 #include "tkr/engine/batch_digest.h"
 #include "tkr/engine/batch_normalizer.h"
 #include "tkr/engine/channel_deferred_ledger.h"
+#include "tkr/engine/merge_deferred_ledger.h"
 #include "tkr/engine/merge_digest.h"
 #include "tkr/engine/session_merger.h"
 #include "tkr/ingress/ingress_dispatch.h"
@@ -114,6 +115,81 @@ Status ProcessDecodedBatchFrame(BatchWireFrame* frame) {
       ledger.HasPending(frame->header.desk_id,
                         frame->header.trade_date_yyyymmdd)) {
     Status successor_st = ProcessCrossFrameSuccessor(frame);
+    ledger.Reset();
+    return successor_st;
+  }
+
+  return Status::kSessionGap;
+}
+
+Status ProcessSessionFrame(SessionMerger* merger, SessionWireFrame* frame) {
+  SessionMergeResult graft = merger->GraftSessionLegs(frame);
+  if (graft.status != Status::kOk) {
+    return graft.status;
+  }
+
+  Status pin_st = merger->PinLegMergeSlots(frame);
+  if (pin_st != Status::kOk) {
+    return pin_st;
+  }
+
+  MergeDigestEngine digest;
+  digest.RegisterMergeSlots(frame->merge_slots);
+
+  MergeDigestResult flushed = digest.FlushMergeDigest();
+  if (flushed.status != Status::kOk) {
+    return flushed.status;
+  }
+  ++g_stats.sessions_merged;
+  return Status::kOk;
+}
+
+Status ProcessCrossFrameSessionSuccessor(SessionMerger* merger,
+                                         SessionWireFrame* frame) {
+  MergeDigestEngine digest;
+  Status arm_st = MergeDeferredLedger::Global().ArmSuccessorFlush(&digest);
+  if (arm_st != Status::kOk) {
+    return arm_st;
+  }
+
+  SessionMergeResult graft = merger->GraftSessionLegs(frame);
+  if (graft.status != Status::kOk) {
+    return graft.status;
+  }
+
+  MergeDigestResult flushed = digest.FlushMergeDigest();
+  if (flushed.status != Status::kOk) {
+    return flushed.status;
+  }
+  ++g_stats.sessions_merged;
+  return Status::kOk;
+}
+
+Status ProcessDecodedSessionFrame(SessionMerger* merger, SessionWireFrame* frame) {
+  if ((frame->header.flags & kLegFlagMergePending) == 0) {
+    return Status::kOk;
+  }
+
+  const bool cross_frame =
+      (frame->header.flags & kLegFlagCrossFrameMerge) != 0;
+  if (!cross_frame) {
+    return ProcessSessionFrame(merger, frame);
+  }
+
+  const std::uint32_t sequence = ExtractSessionCrossFrameSequence(*frame);
+  MergeDeferredLedger& ledger = MergeDeferredLedger::Global();
+
+  if (sequence == 1) {
+    Status stage_st =
+        ledger.StageOpeningSession(*frame, frame->header.checkpoint_seq);
+    if (stage_st != Status::kOk) {
+      return stage_st;
+    }
+    return Status::kOk;
+  }
+
+  if (sequence == 2 && ledger.ReadyForSuccessor(frame->header.session_id)) {
+    Status successor_st = ProcessCrossFrameSessionSuccessor(merger, frame);
     ledger.Reset();
     return successor_st;
   }
@@ -307,34 +383,68 @@ Status MergeSessionLegs(const std::uint8_t* data, std::size_t len) {
     return Status::kTruncated;
   }
 
+  MergeDeferredLedger::Global().Reset();
+
   SessionMerger merger(SessionMergerConfig{true, kMaxSessionLegs});
-  SessionMergeResult decoded = merger.DecodeSession(data, len);
-  if (decoded.status != Status::kOk) {
-    return decoded.status;
+  wire::BatchWireCodec batch_codec(wire::BatchCodecConfig{true, true, kMaxBatchRecords});
+
+  std::size_t offset = 0;
+  while (offset < len) {
+    const std::uint8_t* segment = data + offset;
+    const std::size_t remaining = len - offset;
+    if (remaining < 4) {
+      return Status::kTruncated;
+    }
+
+    const std::uint32_t magic =
+        static_cast<std::uint32_t>(segment[0]) |
+        (static_cast<std::uint32_t>(segment[1]) << 8) |
+        (static_cast<std::uint32_t>(segment[2]) << 16) |
+        (static_cast<std::uint32_t>(segment[3]) << 24);
+
+    if (magic == kSessionMagic) {
+      SessionWireFrame frame{};
+      std::size_t consumed = 0;
+      Status decode_st =
+          DecodeSessionWireFrame(segment, remaining, &frame, &consumed);
+      if (decode_st != Status::kOk) {
+        return decode_st;
+      }
+
+      Status frame_st = ProcessDecodedSessionFrame(&merger, &frame);
+      if (frame_st != Status::kOk) {
+        return frame_st;
+      }
+
+      offset += consumed;
+      continue;
+    }
+
+    if (magic == kBatchMagic) {
+      wire::BatchDecodeResult decoded = batch_codec.DecodeBatch(segment, remaining);
+      if (decoded.status != Status::kOk) {
+        return decoded.status;
+      }
+      if (decoded.consumed_bytes == 0) {
+        return Status::kTruncated;
+      }
+
+      MergeDeferredLedger& ledger = MergeDeferredLedger::Global();
+      if (ledger.HasPending(decoded.frame.header.desk_id)) {
+        Status mutation_st =
+            ledger.ApplyMutation(decoded.frame.header.desk_id);
+        if (mutation_st != Status::kOk) {
+          return mutation_st;
+        }
+      }
+
+      offset += decoded.consumed_bytes;
+      continue;
+    }
+
+    return Status::kUnknownFormat;
   }
 
-  if ((decoded.frame.header.flags & kLegFlagMergePending) == 0) {
-    return Status::kOk;
-  }
-
-  Status pin_st = merger.PinLegMergeSlots(&decoded.frame);
-  if (pin_st != Status::kOk) {
-    return pin_st;
-  }
-
-  MergeDigestEngine digest;
-  digest.RegisterMergeSlots(decoded.frame.merge_slots);
-
-  SessionMergeResult merged = merger.GraftSessionLegs(&decoded.frame);
-  if (merged.status != Status::kOk) {
-    return merged.status;
-  }
-
-  MergeDigestResult flushed = digest.FlushMergeDigest();
-  if (flushed.status != Status::kOk) {
-    return flushed.status;
-  }
-  ++g_stats.sessions_merged;
   return Status::kOk;
 }
 
